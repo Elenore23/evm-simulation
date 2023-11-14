@@ -13,6 +13,19 @@ contract Simulator {
 
     uint32 public constant TAX_CRITERIA = 10;
 
+    function simpleTransfer(
+        uint256 amount,
+        address sendingToken
+    ) external returns (uint256 transferedAmount, uint256 simulatorBalance) {
+        // Send token from simulator (EOA) to this contract
+        IERC20(sendingToken).safeTransferFrom(msg.sender, address(this), amount);
+        transferedAmount = IERC20(sendingToken).balanceOf(address(this));
+
+        // Send token back to simulator(EOA) from contract
+        IERC20(sendingToken).safeTransfer(msg.sender, transferedAmount);
+        simulatorBalance = IERC20(sendingToken).balanceOf(msg.sender);
+    }
+
     function v2SimulateSwap(
         uint256 amountIn,
         address targetPair,
