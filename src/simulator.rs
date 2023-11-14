@@ -385,4 +385,88 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
     
         is_proxy
     }
+
+    pub fn approve(
+        &mut self,
+        token: H160,
+        spender: H160,
+        commit: bool
+    ) -> Result<bool> {
+        let calldata = self
+            .token
+            .approve_input(spender)?;
+
+        let tx = Tx {
+            caller: self.owner.into(),
+            transact_to: token,
+            data: calldata.0,
+            value: U256::zero(),
+            gas_limit: 5000000,
+        };
+
+        let value = if commit {
+            self.call(tx)?
+        } else {
+            self.staticcall(tx)?
+        };
+        let out = self.token.approve_output(value.output)?;
+        Ok(out)
+    }
+
+    // This function will fail with the message of
+    // "missing or wrong function selector"
+    pub fn transfer(
+        &mut self,
+        token: H160,
+        recipient: H160,
+        amount: U256,
+        commit: bool,
+    ) -> Result<bool> {
+        let calldata = self
+            .token
+            .transfer_input(recipient, amount)?;
+
+        let tx = Tx {
+            caller: self.owner.into(),
+            transact_to: token,
+            data: calldata.0,
+            value: U256::zero(),
+            gas_limit: 5000000,
+        };
+
+        let value = if commit {
+            self.call(tx)?
+        } else {
+            self.staticcall(tx)?
+        };
+        let out = self.token.transfer_output(value.output)?;
+        Ok(out)
+    }
+
+    pub fn simple_transfer(
+        &mut self,
+        amount: U256,
+        sending_token: H160,
+        commit: bool,
+    ) -> Result<((U256, U256), u64)> {
+        let calldata = self
+            .simulator
+            .simple_transfer_input(amount, sending_token)?;
+
+        let tx = Tx {
+            caller: self.owner,
+            transact_to: self.simulator_address,
+            data: calldata.0,
+            value: U256::zero(),
+            gas_limit: 5000000,
+        };
+        let value = if commit {
+            self.call(tx)?
+        } else {
+            self.staticcall(tx)?
+        };
+
+        let out = self.simulator.simple_transfer_output(value.output)?;
+        Ok((out, value.gas_used))
+    }
 }
