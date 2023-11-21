@@ -89,6 +89,7 @@ contract Simulator {
             }
         }
         uint256 actualAmountIn = IERC20(inputToken).balanceOf(targetPair) - reserveIn;
+        require((actualAmountIn * 100)/ amountIn > 90, "Tax Alert: Invalid tax rate");
         transferredAmount = actualAmountIn;
         uint256 amountOut = this.getAmountOut(actualAmountIn, reserveIn, reserveOut);
 
