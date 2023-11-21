@@ -4,7 +4,7 @@ use ethers::abi::parse_abi;
 use ethers::prelude::BaseContract;
 use ethers::types::{Bytes, H160, U256};
 
-use crate::constants::{TransferedAmount, SwappedAmount};
+use crate::constants::{TransferredAmount, SwappedAmount};
 
 #[derive(Clone)]
 pub struct SimulatorABI {
@@ -57,7 +57,7 @@ impl SimulatorABI {
         Ok(calldata)
     }
 
-    pub fn sell_simulate_swap_output(&self, output: OutputBytes) -> Result<(TransferedAmount, SwappedAmount)> {
+    pub fn sell_simulate_swap_output(&self, output: OutputBytes) -> Result<(TransferredAmount, SwappedAmount)> {
         let out = self.abi.decode_output("sellSimulateSwap", output)?;
         Ok(out)
     }

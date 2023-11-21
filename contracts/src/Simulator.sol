@@ -73,7 +73,7 @@ contract Simulator {
         address targetPair,
         address inputToken,
         address outputToken
-    ) external returns (uint256 transferedAmount, uint256 swappedAmount) {
+    ) external returns (uint256 transferredAmount, uint256 swappedAmount) {
         IERC20(inputToken).safeTransfer(targetPair, amountIn);
         uint256 reserveIn;
         uint256 reserveOut;
@@ -89,7 +89,7 @@ contract Simulator {
             }
         }
         uint256 actualAmountIn = IERC20(inputToken).balanceOf(targetPair) - reserveIn;
-        transferedAmount = actualAmountIn;
+        transferredAmount = actualAmountIn;
         uint256 amountOut = this.getAmountOut(actualAmountIn, reserveIn, reserveOut);
 
         // If the token is taxed, you won't receive amountOut back, and the swap will revert

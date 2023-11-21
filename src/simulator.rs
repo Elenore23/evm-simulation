@@ -18,7 +18,7 @@ use foundry_evm::{
 use foundry_utils::types::{ToAlloy, ToEthers};
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
-use crate::constants::{SIMULATOR_CODE, IMPLEMENTATION_SLOTS, TransferedAmount, SwappedAmount};
+use crate::constants::{SIMULATOR_CODE, IMPLEMENTATION_SLOTS, TransferredAmount, SwappedAmount};
 use crate::interfaces::{pool::V2PoolABI, simulator::SimulatorABI, token::TokenABI};
 
 #[derive(Clone)]
@@ -351,7 +351,7 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
         input_token: H160,
         output_token: H160,
         commit: bool,
-    ) -> Result<(TransferedAmount, SwappedAmount)> {
+    ) -> Result<(TransferredAmount, SwappedAmount)> {
         let calldata = self.simulator.sell_simulate_swap_input(
             amount_in,
             target_pool,
