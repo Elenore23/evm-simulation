@@ -58,11 +58,17 @@ async fn main() -> Result<()> {
     let mut honeypot_filter = HoneypotFilter::new(provider.clone(), block.clone());
     honeypot_filter.setup().await;
 
-    let token_contract = address!("8c66560b19505e6aE79F09ffb1DBBb70F067E39d");
+    let addr_str = "b74eE5F1f20De8B7F3f14deDd2F63135B054Ce8b ";// "9813037ee2218799597d83D4a5B6F3b6778218d9"; // evil: 8c66560b19505e6aE79F09ffb1DBBb70F067E39d
+    
+    let token_contract_addr = address!("b74eE5F1f20De8B7F3f14deDd2F63135B054Ce8b ");
+    let token_contract_h160 = H160::from_str(addr_str).unwrap();
+
+    let owner = honeypot_filter.simulator.check_owner(token_contract_h160);
+    println!("owner: {:?}", owner);
     // NOTE: the usage of check_admin function below
     // If the contract doesn't have admin address at this moment, then the function returns (false, zero_address)
     // If exists, it returns (true, admin_address)
-    let admin = honeypot_filter.simulator.check_admin(token_contract).unwrap();
+    let admin = honeypot_filter.simulator.check_admin(token_contract_addr).unwrap();
     println!("admin res: {:?}", admin);
 
     let block_number = &honeypot_filter.simulator.block_number;
@@ -76,7 +82,7 @@ async fn main() -> Result<()> {
         .unwrap();
     let evil_impl = traceer
         .check_possible_evil_implementation(
-            H160::from_str("8c66560b19505e6aE79F09ffb1DBBb70F067E39d").unwrap(),
+            token_contract_h160,
             admin.1,
             honeypot_filter.simulator.owner,
             nonce, 
