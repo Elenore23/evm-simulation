@@ -20,6 +20,8 @@ use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use crate::constants::{IMPLEMENTATION_SLOTS, SIMULATOR_CODE};
 use crate::interfaces::{pool::V2PoolABI, simulator::SimulatorABI, token::TokenABI};
+use crate::tokens::get_token_info;
+use crate::trace::EvmTracer;
 
 #[derive(Clone)]
 pub struct EvmSimulator<M> {
@@ -49,6 +51,13 @@ pub struct TxResult {
     pub output: Bytes,
     pub gas_used: u64,
     pub gas_refunded: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SimpleTransferResult {
+    pub transfered_amount: U256,
+    pub return_amount: U256,
+    pub gas_used: u64,
 }
 
 impl<M: Middleware + 'static> EvmSimulator<M> {
@@ -175,6 +184,57 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
 
     pub fn call(&mut self, tx: Tx) -> Result<TxResult> {
         self._call(tx, true)
+    }
+
+    pub async fn simulate_tax(&mut self, token: H160) -> Result<(U256, U256)> {
+        self.deploy_simulator();
+
+        let amount_u32 = 10000;
+        let token_info = get_token_info(self.provider.clone(), token).await.unwrap();
+        let amount = U256::from(amount_u32)
+            .checked_mul(U256::from(10).pow(U256::from(token_info.decimals)))
+            .unwrap();
+
+        let tracer = EvmTracer::new(self.provider.clone());
+        let chain_id = self.provider.get_chainid().await.unwrap();
+        let token_slot = tracer
+            .find_balance_slot(
+                token,
+                self.owner,
+                U256::zero(),
+                U64::from(chain_id.as_u64()),
+                self.block_number.as_u64(),
+            )
+            .await
+            .unwrap();
+
+        self.set_token_balance(self.owner, token, token_info.decimals, token_slot.1, amount_u32);
+
+        self.approve(token, self.simulator_address, true).unwrap();
+
+        // Transfer Test
+        let transfer_result = self.simple_transfer(amount, token, true)?;
+
+        // TODO: Make a validation against gas cost
+        // let gas_cost = out.1;
+
+        let send_transfered_amount = transfer_result.transfered_amount;
+        let reducted_out_amount = amount.checked_sub(send_transfered_amount).unwrap();
+        let buy_tax_rate =
+            reducted_out_amount.checked_mul(U256::from(100)).unwrap().checked_div(amount).unwrap();
+
+        let return_transfered_amount = transfer_result.return_amount;
+
+        let reducted_out_amount =
+            send_transfered_amount.checked_sub(return_transfered_amount).unwrap();
+        let sell_tax_rate = reducted_out_amount
+            .checked_mul(U256::from(100))
+            .unwrap()
+            .checked_div(send_transfered_amount)
+            .unwrap();
+
+        // NOTE: should we return gas comsumption?
+        Ok((buy_tax_rate, sell_tax_rate))
     }
 
     pub fn get_eth_balance(&mut self) -> U256 {
@@ -316,5 +376,71 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
         }
 
         is_proxy
+    }
+
+    pub fn approve(&mut self, token: H160, spender: H160, commit: bool) -> Result<bool> {
+        let calldata = self.token.approve_input(spender)?;
+
+        let tx = Tx {
+            caller: self.owner.into(),
+            transact_to: token,
+            data: calldata.0,
+            value: U256::zero(),
+            gas_limit: 5000000,
+        };
+
+        let value = if commit { self.call(tx)? } else { self.staticcall(tx)? };
+        let out = self.token.approve_output(value.output)?;
+        Ok(out)
+    }
+
+    // This function will fail with the message of
+    // "missing or wrong function selector"
+    pub fn transfer(
+        &mut self,
+        token: H160,
+        recipient: H160,
+        amount: U256,
+        commit: bool,
+    ) -> Result<bool> {
+        let calldata = self.token.transfer_input(recipient, amount)?;
+
+        let tx = Tx {
+            caller: self.owner.into(),
+            transact_to: token,
+            data: calldata.0,
+            value: U256::zero(),
+            gas_limit: 5000000,
+        };
+
+        let value = if commit { self.call(tx)? } else { self.staticcall(tx)? };
+        let out = self.token.transfer_output(value.output)?;
+        Ok(out)
+    }
+
+    pub fn simple_transfer(
+        &mut self,
+        amount: U256,
+        sending_token: H160,
+        commit: bool,
+    ) -> Result<SimpleTransferResult> {
+        let calldata = self.simulator.simple_transfer_input(amount, sending_token)?;
+
+        let tx = Tx {
+            caller: self.owner,
+            transact_to: self.simulator_address,
+            data: calldata.0,
+            value: U256::zero(),
+            gas_limit: 5000000,
+        };
+        let value = if commit { self.call(tx)? } else { self.staticcall(tx)? };
+
+        let out = self.simulator.simple_transfer_output(value.output)?;
+
+        Ok(SimpleTransferResult {
+            transfered_amount: out.0,
+            return_amount: out.1,
+            gas_used: value.gas_used,
+        })
     }
 }

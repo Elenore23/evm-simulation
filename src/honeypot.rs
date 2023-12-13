@@ -15,19 +15,11 @@ const TAX_CRITERIA: f64 = 0.1;
 #[derive(Debug, Clone)]
 pub struct SafeTokens {
     pub weth: H160,
-    // pub usdt: H160,
-    // pub usdc: H160,
-    // pub dai: H160,
 }
 
 impl SafeTokens {
     pub fn new() -> Self {
-        Self {
-            // usdt: H160::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap(),
-            weth: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-            // usdc: H160::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-            // dai: H160::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap(),
-        }
+        Self { weth: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap() }
     }
 }
 
@@ -38,8 +30,8 @@ pub struct HoneypotFilter<M> {
     pub safe_token_info: HashMap<H160, Token>,
     pub balance_slots: HashMap<H160, u32>,
     pub honeypot: HashMap<H160, bool>,
-    pub buy_tax: f64,
-    pub sell_tax: f64,
+    buy_tax: HashMap<H160, f64>,
+    sell_tax: HashMap<H160, f64>,
 }
 
 impl<M: Middleware + 'static> HoneypotFilter<M> {
@@ -51,6 +43,8 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
         let safe_token_info = HashMap::new();
         let balance_slots = HashMap::new();
         let honeypot = HashMap::new();
+        let buy_tax = HashMap::new();
+        let sell_tax = HashMap::new();
         Self {
             simulator,
             safe_tokens,
@@ -58,8 +52,8 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
             safe_token_info,
             balance_slots,
             honeypot,
-            buy_tax: 0.0,
-            sell_tax: 0.0,
+            buy_tax,
+            sell_tax,
         }
     }
 
@@ -114,6 +108,69 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
         }
     }
 
+    pub async fn validate_token(
+        &mut self,
+        token: H160,
+        buy_tax_criteria: Option<U256>,
+        sell_tax_criteria: Option<U256>,
+    ) {
+        let buy_tax_criteria = buy_tax_criteria.unwrap_or(U256::from(5)); // 5%
+        let sell_tax_criteria = sell_tax_criteria.unwrap_or(U256::from(10));
+
+        let simulate_tax_res = self.simulator.simulate_tax(token).await;
+        let out = match simulate_tax_res {
+            Ok(out) => out,
+            Err(e) => {
+                info!("<Transfer ERROR>: {:?}", e);
+                self.honeypot.insert(token, true);
+                return;
+            }
+        };
+
+        if out.0.ge(&buy_tax_criteria) {
+            info!("<Send ERROR> Buy Tax Rate: {:?}", out.0);
+            self.honeypot.insert(token, true);
+        }
+
+        if out.1.ge(&sell_tax_criteria) {
+            info!("<Send ERROR> Sell Tax Rate: {:?}", out.1);
+            self.honeypot.insert(token, true);
+        }
+
+        self.buy_tax.insert(token, out.0.as_u64() as f64 / 100.0);
+        self.sell_tax.insert(token, out.1.as_u64() as f64 / 100.0);
+    }
+
+    // TODO: Change the arg type so we can directly start executing validation
+    //  Now, it's using &Vec<Pool> type to take advantage of the `filter_tokens` function implementation
+    // But, this function will be used to validate token which doesn't have pool yet.
+    // Use "tokens" with the same type instead of pools
+    pub async fn validate_tokens(&mut self, pools: &Vec<Pool>) {
+        self.simulator.deploy_simulator();
+
+        let mut tokens = Vec::new();
+        // TODO: This part can be cut
+        for (_, pool) in pools.iter().enumerate() {
+            let token0_is_safe = self.safe_token_info.contains_key(&pool.token0);
+            let token1_is_safe = self.safe_token_info.contains_key(&pool.token1);
+
+            // only test for token if it's a match with either of the safe tokens
+            if token0_is_safe || token1_is_safe {
+                let (_, test_token) = if token0_is_safe {
+                    (pool.token0, pool.token1)
+                } else {
+                    (pool.token1, pool.token0)
+                };
+
+                tokens.push(test_token)
+            }
+        }
+
+        for (_, token) in tokens.iter().enumerate() {
+            self.validate_token(*token, None, None).await;
+        }
+    }
+
     pub async fn filter_tokens(&mut self, pools: &Vec<Pool>) {
         self.simulator.deploy_simulator();
 
@@ -153,7 +210,7 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
 
                 // We take extra measures to filter out the pools with too little liquidity
                 // Using the below amount to test swaps, we know that there's enough liquidity in the pool
-                let mut amount_in_u32 = 1;
+                let amount_in_u32 = 1;
                 let mut amount_in_f64 = 1.0;
 
                 if safe_token == self.safe_tokens.weth {
@@ -210,7 +267,7 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
                 let buy_tax_rate =
                     out_ratio.checked_mul(U256::from(10000)).unwrap().checked_div(out.0).unwrap();
                 let buy_tax_rate = buy_tax_rate.as_u64() as f64 / 10000.0;
-                self.buy_tax = buy_tax_rate;
+                self.buy_tax.insert(test_token, buy_tax_rate);
 
                 if buy_tax_rate < TAX_CRITERIA {
                     // Sell Test
@@ -238,7 +295,7 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
                         .checked_div(out.0)
                         .unwrap();
                     let sell_tax_rate = sell_tax_rate.as_u64() as f64 / 10000.0;
-                    self.sell_tax = sell_tax_rate;
+                    self.sell_tax.insert(test_token, sell_tax_rate);
 
                     if sell_tax_rate < TAX_CRITERIA {
                         match get_token_info(self.simulator.provider.clone(), test_token).await {
@@ -262,8 +319,10 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
         }
     }
 
-    pub fn get_tax_rate(&self) -> (f64, f64) {
-        (self.buy_tax, self.sell_tax)
+    pub fn get_tax_rate(&self, token: H160) -> (f64, f64) {
+        let buy_tax_rate = self.buy_tax.get(&token).unwrap_or(&0.0);
+        let sell_tax_rate = self.sell_tax.get(&token).unwrap_or(&0.0);
+        (*buy_tax_rate, *sell_tax_rate)
     }
 
     pub fn is_honeypot(&self, token: H160) -> bool {

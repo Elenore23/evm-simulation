@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
 
     let mut honeypot_filter = HoneypotFilter::new(provider.clone(), block.clone());
     honeypot_filter.setup().await;
+
     honeypot_filter.filter_tokens(&pools[0..5000].to_vec()).await;
 
     let verified_pools: Vec<Pool> = pools

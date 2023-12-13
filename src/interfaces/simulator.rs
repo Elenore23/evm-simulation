@@ -15,6 +15,7 @@ impl SimulatorABI {
             parse_abi(&[
                 "function v2SimulateSwap(uint256,address,address,address) external returns (uint256, uint256)",
                 "function getAmountOut(uint256,uint256,uint256) external returns (uint256)",
+                "function simpleTransfer(uint256,address) external returns (uint256, uint256)",
             ]).unwrap()
         );
         Self { abi }
@@ -50,6 +51,16 @@ impl SimulatorABI {
 
     pub fn get_amount_out_output(&self, output: OutputBytes) -> Result<U256> {
         let out = self.abi.decode_output("getAmountOut", output)?;
+        Ok(out)
+    }
+
+    pub fn simple_transfer_input(&self, amount: U256, sending_token: H160) -> Result<Bytes> {
+        let calldata = self.abi.encode("simpleTransfer", (amount, sending_token))?;
+        Ok(calldata)
+    }
+
+    pub fn simple_transfer_output(&self, output: OutputBytes) -> Result<(U256, U256)> {
+        let out = self.abi.decode_output("simpleTransfer", output)?;
         Ok(out)
     }
 }

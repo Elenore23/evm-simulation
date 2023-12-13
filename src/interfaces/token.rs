@@ -15,6 +15,7 @@ impl TokenABI {
             parse_abi(&[
                 "function balanceOf(address) external view returns (uint256)",
                 "function approve(address spender, uint256 value) external view returns (bool)",
+                "function transfer(address,uint256) external returns (bool)",
             ])
             .unwrap(),
         );
@@ -38,6 +39,16 @@ impl TokenABI {
 
     pub fn approve_output(&self, output: OutputBytes) -> Result<bool> {
         let out = self.abi.decode_output("approve", output)?;
+        Ok(out)
+    }
+
+    pub fn transfer_input(&self, recipient: H160, amount: U256) -> Result<Bytes> {
+        let calldata = self.abi.encode("transfer", (recipient, amount))?;
+        Ok(calldata)
+    }
+
+    pub fn transfer_output(&self, output: OutputBytes) -> Result<bool> {
+        let out = self.abi.decode("transfer", output)?;
         Ok(out)
     }
 }
