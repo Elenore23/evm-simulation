@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Ok, Result};
 use ethers::{
     abi::{self, parse_abi},
     prelude::*,
@@ -9,7 +9,7 @@ use foundry_common::types::ToEthers;
 use foundry_evm::revm::primitives::keccak256;
 use std::sync::Arc;
 
-use crate::constants::{DEFAULT_CHAIN_ID, DEFAULT_RECIPIENT, DEFAULT_SENDER};
+use crate::constants::{DEFAULT_CHAIN_ID, DEFAULT_RECIPIENT};
 
 pub struct EvmTracer<M> {
     provider: Arc<M>,
@@ -110,25 +110,17 @@ impl<M: Middleware + 'static> EvmTracer<M> {
         }
     }
 
-    // Result touple represents,
-    // bool: existence of possible evil implementation. This becomes true if i32 has greater num than 1 or mapping(owner => ) storage is touched.
-    // first i32: simple count of mapping(sender_address => ) type in touched storage during transfer execution
+    // Checks if possible evil implementation exists. This returns true if the number of mapping(sender => ) is greater than 1 or mapping(owner => ) storage is touched.
     pub async fn check_possible_evil_implementation(
         &self,
         token: H160,
-        sender: Option<H160>,
-        sender_balance: bool,
-        recipient: Option<H160>,
-        owner: Option<H160>, // Optional, could be None if there's none.
-        nonce: Option<U256>,
-        chain_id: Option<U64>,
-        block_number: u64, // must be the number after the one contract's created
-    ) -> Result<(bool, i32)> {
-        let sender = sender.unwrap_or(*DEFAULT_SENDER);
-        let recipient = recipient.unwrap_or(*DEFAULT_RECIPIENT);
-        let owner = owner.unwrap_or(H160::zero()); // H160::zero()は0x0を意味します
-        let nonce = nonce.unwrap_or(U256::default());
-        let chain_id = chain_id.unwrap_or(DEFAULT_CHAIN_ID);
+        owner: H160,
+        sender: H160,
+    ) -> Result<bool> {
+        let recipient = *DEFAULT_RECIPIENT;
+        let nonce = U256::default();
+        let chain_id = DEFAULT_CHAIN_ID;
+        let block_number = self.provider.get_block_number().await.unwrap().as_u64();
 
         // A brute force way of finding the storage slot value of an ERC-20 token
         // Calling transfer and tracing the call using "debug_traceCall" will give us access to the
@@ -143,69 +135,70 @@ impl<M: Middleware + 'static> EvmTracer<M> {
             parse_abi(&["function transfer(address,uint256) external returns (bool)"]).unwrap(),
         );
         let calldata = erc20_contract.encode("transfer", (recipient, U256::one())).unwrap();
-        let tx = Eip1559TransactionRequest {
-            to: Some(NameOrAddress::Address(token)),
-            from: Some(sender),
-            data: Some(calldata.0.into()),
-            value: Some(U256::zero()),
-            chain_id: Some(chain_id),
-            max_priority_fee_per_gas: None,
-            max_fee_per_gas: None,
-            gas: None,
-            nonce: Some(nonce),
-            access_list: AccessList::default(),
-        };
-        let trace = self.get_state_diff(tx, block_number).await.unwrap();
 
-        let mut simple_count = 0;
-        let mut owner_key_storage = false;
-        match trace {
-            GethTrace::Known(known) => match known {
-                GethTraceFrame::PreStateTracer(prestate) => match prestate {
-                    PreStateFrame::Default(prestate_mode) => {
-                        let token_info =
-                            prestate_mode.0.get(&token).ok_or(anyhow!("no token key"))?;
-                        let touched_storage =
-                            token_info.storage.clone().ok_or(anyhow!("no storage values"))?;
-                        for i in 0..20 {
-                            let slot = keccak256(&abi::encode(&[
-                                abi::Token::Address(sender),
-                                abi::Token::Uint(U256::from(i)),
-                            ]));
-                            match touched_storage.get(&slot.to_ethers()) {
-                                Some(_) => {
-                                    simple_count += 1;
-                                }
-                                None => {
-                                    if !owner.is_zero() && owner_key_storage == false {
-                                        let owner_slot = keccak256(&abi::encode(&[
-                                            abi::Token::Address(owner),
-                                            abi::Token::Uint(U256::from(i)),
-                                        ]));
-                                        match touched_storage.get(&owner_slot.to_ethers()) {
-                                            Some(_) => {
-                                                owner_key_storage = true;
+        for from_address in vec![sender, owner] {
+            let is_owner = from_address == owner;
+            let tx = Eip1559TransactionRequest {
+                to: Some(NameOrAddress::Address(token)),
+                from: Some(from_address),
+                data: Some(calldata.clone().0.into()),
+                value: Some(U256::zero()),
+                chain_id: Some(chain_id),
+                max_priority_fee_per_gas: None,
+                max_fee_per_gas: None,
+                gas: None,
+                nonce: Some(nonce),
+                access_list: AccessList::default(),
+            };
+            let trace = self.get_state_diff(tx, block_number).await.unwrap();
+
+            let mut count = 0;
+            match trace {
+                GethTrace::Known(known) => match known {
+                    GethTraceFrame::PreStateTracer(prestate) => match prestate {
+                        PreStateFrame::Default(prestate_mode) => {
+                            let token_info =
+                                prestate_mode.0.get(&token).ok_or(anyhow!("no token key"))?;
+                            let touched_storage =
+                                token_info.storage.clone().ok_or(anyhow!("no storage values"))?;
+                            for i in 0..20 {
+                                let slot = keccak256(&abi::encode(&[
+                                    abi::Token::Address(from_address),
+                                    abi::Token::Uint(U256::from(i)),
+                                ]));
+                                match touched_storage.get(&slot.to_ethers()) {
+                                    Some(_) => {
+                                        count += 1;
+                                        if (is_owner && count.ge(&2)) || (!is_owner && count.ge(&1))
+                                        {
+                                            return Ok(true);
+                                        }
+                                    }
+                                    None => {
+                                        if !owner.is_zero() {
+                                            let owner_slot = keccak256(&abi::encode(&[
+                                                abi::Token::Address(owner),
+                                                abi::Token::Uint(U256::from(i)),
+                                            ]));
+                                            match touched_storage.get(&owner_slot.to_ethers()) {
+                                                Some(_) => {
+                                                    return Ok(true);
+                                                }
+                                                None => {}
                                             }
-                                            None => {}
                                         }
                                     }
                                 }
                             }
                         }
-                        let possible_evil_impl: bool;
-                        if sender_balance {
-                            possible_evil_impl = simple_count.ge(&2) || owner_key_storage;
-                        } else {
-                            possible_evil_impl = simple_count.ge(&1) || owner_key_storage;
-                        }
-                        return Ok((possible_evil_impl, simple_count));
-                    }
-                    _ => Ok((false, 0)),
+                        _ => {}
+                    },
+                    _ => {}
                 },
-                _ => Ok((false, 0)),
-            },
-            _ => Ok((false, 0)),
+                _ => {}
+            }
         }
+        Ok(false)
     }
 
     pub async fn find_v2_reserves_slot(
