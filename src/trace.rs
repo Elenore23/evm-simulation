@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, Result};
 use ethers::{
     abi::{self, parse_abi},
     prelude::*,
