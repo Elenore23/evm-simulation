@@ -1,4 +1,5 @@
 use alloy_primitives::{Address, U160};
+use ethers::abi::Abi;
 use ethers::types::{Block, BlockId, BlockNumber, H160, H256, U256, U64};
 use ethers_providers::Middleware;
 use log::info;
@@ -30,6 +31,7 @@ pub struct HoneypotFilter<M> {
     pub safe_token_info: HashMap<H160, Token>,
     pub balance_slots: HashMap<H160, u32>,
     pub honeypot: HashMap<H160, bool>,
+    pub etherscan_api_key: Option<String>,
     buy_tax: HashMap<H160, f64>,
     sell_tax: HashMap<H160, f64>,
     is_proxy: HashMap<H160, bool>,
@@ -54,6 +56,7 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
             safe_token_info,
             balance_slots,
             honeypot,
+            etherscan_api_key: None,
             buy_tax,
             sell_tax,
             is_proxy,
@@ -109,6 +112,10 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
                 }
             }
         }
+    }
+
+    pub fn set_etherscan_api_key(&mut self, api_key: String) {
+        self.etherscan_api_key = Some(api_key);
     }
 
     pub async fn validate_token(
@@ -328,6 +335,27 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
                 }
             }
         }
+    }
+
+    pub async fn has_add_bots(&self, token: H160) -> Result<bool, Box<dyn std::error::Error>> {
+        let client = reqwest::Client::new();
+
+        let etherscan_api_key = match &self.etherscan_api_key {
+            Some(key) => key,
+            None => return Err("Etherscan API key is not set".into()),
+        };
+        let abi_url = format!(
+            "https://api.etherscan.io/api?module=contract&action=getabi&address={}&apikey={}",
+            format!("{token:?}"),
+            etherscan_api_key
+        );
+        let response = client.get(&abi_url).send().await?.text().await?;
+        let abi: Abi = serde_json::from_str(&response)?;
+
+        let signature = "addBots(address)";
+        let contains_signature = abi.functions().any(|function| function.signature() == signature);
+
+        Ok(contains_signature)
     }
 
     pub fn get_tax_rate(&self, token: H160) -> (f64, f64) {
