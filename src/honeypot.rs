@@ -4,6 +4,7 @@ use ethers::abi::Abi;
 use ethers::types::{Block, BlockId, BlockNumber, H160, H256, U256, U64};
 use ethers_providers::Middleware;
 use log::info;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use crate::pools::Pool;
@@ -23,6 +24,13 @@ impl SafeTokens {
     pub fn new() -> Self {
         Self { weth: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap() }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct EtherscanApiResponse {
+    status: String,
+    message: String,
+    result: String,
 }
 
 pub struct HoneypotFilter<M> {
@@ -349,8 +357,9 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
             "https://api.etherscan.io/api?module=contract&action=getabi&address={:?}&apikey={}",
             token, etherscan_api_key
         );
-        let response = client.get(&abi_url).send().await?.text().await?;
-        let abi: Abi = serde_json::from_str(&response)?;
+        let response = client.get(&abi_url).send().await?;
+        let api_response: EtherscanApiResponse = response.json().await?;
+        let abi: Abi = serde_json::from_str(&api_response.result)?;
 
         let signature = "addBots(address)";
         let contains_signature = abi.functions().any(|function| function.signature() == signature);
