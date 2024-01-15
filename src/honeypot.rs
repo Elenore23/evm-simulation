@@ -346,9 +346,8 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
             None => return Err(anyhow!("Etherscan API key is not set")),
         };
         let abi_url = format!(
-            "https://api.etherscan.io/api?module=contract&action=getabi&address={}&apikey={}",
-            format!("{token:?}"),
-            etherscan_api_key
+            "https://api.etherscan.io/api?module=contract&action=getabi&address={:?}&apikey={}",
+            token, etherscan_api_key
         );
         let response = client.get(&abi_url).send().await?.text().await?;
         let abi: Abi = serde_json::from_str(&response)?;
