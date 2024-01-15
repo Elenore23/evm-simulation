@@ -1,4 +1,5 @@
 use alloy_primitives::{Address, U160};
+use anyhow::{anyhow, Result};
 use ethers::abi::Abi;
 use ethers::types::{Block, BlockId, BlockNumber, H160, H256, U256, U64};
 use ethers_providers::Middleware;
@@ -337,12 +338,12 @@ impl<M: Middleware + 'static> HoneypotFilter<M> {
         }
     }
 
-    pub async fn has_add_bots(&self, token: H160) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn has_add_bots(&self, token: H160) -> Result<bool> {
         let client = reqwest::Client::new();
 
         let etherscan_api_key = match &self.etherscan_api_key {
             Some(key) => key,
-            None => return Err("Etherscan API key is not set".into()),
+            None => return Err(anyhow!("Etherscan API key is not set")),
         };
         let abi_url = format!(
             "https://api.etherscan.io/api?module=contract&action=getabi&address={}&apikey={}",
