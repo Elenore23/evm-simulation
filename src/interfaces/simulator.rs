@@ -59,7 +59,7 @@ impl SimulatorABI {
         Ok(calldata)
     }
 
-    pub fn simple_transfer_output(&self, output: OutputBytes) -> Result<(U256, U256)> {
+    pub fn simple_transfer_output(&self, output: OutputBytes) -> Result<U256> {
         let out = self.abi.decode_output("simpleTransfer", output)?;
         Ok(out)
     }

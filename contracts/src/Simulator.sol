@@ -11,19 +11,13 @@ import "./utils/SafeERC20.sol";
 contract Simulator {
     using SafeERC20 for IERC20;
 
-    uint32 public constant TAX_CRITERIA = 10;
-
     function simpleTransfer(
         uint256 amount,
         address sendingToken
-    ) external returns (uint256 transferedAmount, uint256 simulatorBalance) {
+    ) external returns (uint256 transferedAmount) {
         // Send token from simulator (EOA) to this contract
         IERC20(sendingToken).safeTransferFrom(msg.sender, address(this), amount);
         transferedAmount = IERC20(sendingToken).balanceOf(address(this));
-
-        // Send token back to simulator(EOA) from contract
-        IERC20(sendingToken).safeTransfer(msg.sender, transferedAmount);
-        simulatorBalance = IERC20(sendingToken).balanceOf(msg.sender);
     }
 
     function v2SimulateSwap(
@@ -31,7 +25,7 @@ contract Simulator {
         address targetPair,
         address inputToken,
         address outputToken
-    ) external returns (uint256 amountOut, uint256 realAfterBalance) {
+    ) external returns (uint256 targetedAmountOut, uint256 realAfterBalance) {
         // 1. Check if you can transfer the token
         // Some honeypot tokens won't allow you to transfer tokens
         IERC20(inputToken).safeTransfer(targetPair, amountIn);
@@ -53,12 +47,11 @@ contract Simulator {
         }
 
         // 2. Calculate the amount out you are supposed to get if the token isn't taxed
+        // use amountIn defined as an arg to calculate the amountOut without tax
+        targetedAmountOut = this.getAmountOut(amountIn, reserveIn, reserveOut);
         uint256 actualAmountIn = IERC20(inputToken).balanceOf(targetPair) -
             reserveIn;
-        amountOut = this.getAmountOut(actualAmountIn, reserveIn, reserveOut);
-
-        // Take the tax into account
-        amountOut = (amountOut * (100 - TAX_CRITERIA)) / 100;
+        uint256 amountOut = this.getAmountOut(actualAmountIn, reserveIn, reserveOut);
 
         // If the token is taxed, you won't receive amountOut back, and the swap will revert
         uint256 outBalanceBefore = IERC20(outputToken).balanceOf(address(this));

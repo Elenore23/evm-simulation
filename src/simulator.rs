@@ -58,7 +58,6 @@ pub struct TxResult {
 #[derive(Debug, Clone)]
 pub struct SimpleTransferResult {
     pub transfered_amount: U256,
-    pub return_amount: U256,
     pub gas_used: u64,
 }
 
@@ -189,17 +188,10 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
         self._call(tx, true)
     }
 
-    pub async fn simulate_tax(&mut self, token: H160) -> Result<(U256, U256)> {
-        self.deploy_simulator();
-
-        let amount_u32 = 10000;
-        let token_info = get_token_info(self.provider.clone(), token).await.unwrap();
-        let amount = U256::from(amount_u32)
-            .checked_mul(U256::from(10).pow(U256::from(token_info.decimals)))
-            .unwrap();
-
+    pub async fn execute_set_token_balance(&mut self, token: H160, balance: u32, decimals: u8) {
         let tracer = EvmTracer::new(self.provider.clone());
         let chain_id = self.provider.get_chainid().await.unwrap();
+
         let token_slot = tracer
             .find_balance_slot(
                 token,
@@ -211,8 +203,17 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
             .await
             .unwrap();
 
-        self.set_token_balance(self.owner, token, token_info.decimals, token_slot.1, amount_u32);
+        self.set_token_balance(self.owner, token, decimals, token_slot.1, balance);
+    }
 
+    pub async fn simulate_simple_transfer(&mut self, token: H160) -> Result<U256> {
+        let amount_u32 = 10000;
+        let token_info = get_token_info(self.provider.clone(), token).await?;
+        let amount = U256::from(amount_u32)
+            .checked_mul(U256::from(10).pow(U256::from(token_info.decimals)))
+            .unwrap();
+
+        self.execute_set_token_balance(token, amount_u32, token_info.decimals).await;
         self.approve(token, self.simulator_address, true).unwrap();
 
         // Transfer Test
@@ -221,23 +222,13 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
         // TODO: Make a validation against gas cost
         // let gas_cost = out.1;
 
-        let send_transfered_amount = transfer_result.transfered_amount;
-        let reducted_out_amount = amount.checked_sub(send_transfered_amount).unwrap();
-        let buy_tax_rate =
+        let sent_amount = transfer_result.transfered_amount;
+        let reducted_out_amount = amount.checked_sub(sent_amount).unwrap();
+        let transfer_tax_rate =
             reducted_out_amount.checked_mul(U256::from(100)).unwrap().checked_div(amount).unwrap();
 
-        let return_transfered_amount = transfer_result.return_amount;
-
-        let reducted_out_amount =
-            send_transfered_amount.checked_sub(return_transfered_amount).unwrap();
-        let sell_tax_rate = reducted_out_amount
-            .checked_mul(U256::from(100))
-            .unwrap()
-            .checked_div(send_transfered_amount)
-            .unwrap();
-
         // NOTE: should we return gas comsumption?
-        Ok((buy_tax_rate, sell_tax_rate))
+        Ok(transfer_tax_rate)
     }
 
     pub fn get_eth_balance(&mut self) -> U256 {
@@ -441,11 +432,7 @@ impl<M: Middleware + 'static> EvmSimulator<M> {
 
         let out = self.simulator.simple_transfer_output(value.output)?;
 
-        Ok(SimpleTransferResult {
-            transfered_amount: out.0,
-            return_amount: out.1,
-            gas_used: value.gas_used,
-        })
+        Ok(SimpleTransferResult { transfered_amount: out, gas_used: value.gas_used })
     }
 
     // It calls owner() view function in the format of Ownable interface from OpenZeppelin
