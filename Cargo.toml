@@ -35,11 +35,11 @@ alloy-primitives = "0.5.0"
 colored = "2.0.0"
 log = "0.4.17"
 indicatif = "0.17.5"
-indoc = "2"
 fern = { version = "0.6.2", features = ["colored"] }
 chrono = "0.4.23"
 csv = "1.2.2"
 url = "2.4.1"
+thiserror = "1.0.56"
 
 [patch.crates-io]
 ethers = { git = "https://github.com/gakonst/ethers-rs", rev = "f0e5b194f09c533feb10d1a686ddb9e5946ec107" }
